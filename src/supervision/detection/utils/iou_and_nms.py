@@ -255,31 +255,30 @@ def box_iou_batch(
             npt.NDArray[np.float32], np.empty((count_true, count_det), dtype=np.float32)
         )
 
-    x_min_inter = np.empty((count_true, count_det), dtype=np.float64)
-    x_max_inter = np.empty_like(x_min_inter)
-    y_min_inter = np.empty_like(x_min_inter)
-    y_max_inter = np.empty_like(x_min_inter)
+    area_inter = np.empty((count_true, count_det), dtype=np.float64)
+    area_norm = np.empty_like(area_inter)
+    lower = np.empty_like(area_inter)
 
-    np.maximum(x_min_true[:, None], x_min_det[None, :], out=x_min_inter)
-    np.minimum(x_max_true[:, None], x_max_det[None, :], out=x_max_inter)
-    np.maximum(y_min_true[:, None], y_min_det[None, :], out=y_min_inter)
-    np.minimum(y_max_true[:, None], y_max_det[None, :], out=y_max_inter)
-
-    # we reuse x_max_inter and y_max_inter to store inter_w and inter_h
-    np.subtract(x_max_inter, x_min_inter, out=x_max_inter)  # inter_w
-    np.subtract(y_max_inter, y_min_inter, out=y_max_inter)  # inter_h
-    np.clip(x_max_inter, 0.0, None, out=x_max_inter)
-    np.clip(y_max_inter, 0.0, None, out=y_max_inter)
-
-    area_inter = x_max_inter * y_max_inter  # inter_w * inter_h
+    # Reuse the lower-corner scratch matrix for each axis; the clipped widths
+    # survive in area_inter and area_norm until they are multiplied together.
+    np.minimum(x_max_true[:, None], x_max_det[None, :], out=area_inter)
+    np.maximum(x_min_true[:, None], x_min_det[None, :], out=lower)
+    np.subtract(area_inter, lower, out=area_inter)
+    np.clip(area_inter, 0.0, None, out=area_inter)
+    np.minimum(y_max_true[:, None], y_max_det[None, :], out=area_norm)
+    np.maximum(y_min_true[:, None], y_min_det[None, :], out=lower)
+    np.subtract(area_norm, lower, out=area_norm)
+    np.clip(area_norm, 0.0, None, out=area_norm)
+    np.multiply(area_inter, area_norm, out=area_inter)
 
     area_true = (x_max_true - x_min_true) * (y_max_true - y_min_true)
     area_det = (x_max_det - x_min_det) * (y_max_det - y_min_det)
 
     if overlap_metric == OverlapMetric.IOU:
-        area_norm = area_true[:, None] + area_det[None, :] - area_inter
+        np.add(area_true[:, None], area_det[None, :], out=area_norm)
+        np.subtract(area_norm, area_inter, out=area_norm)
     elif overlap_metric == OverlapMetric.IOS:
-        area_norm = np.minimum(area_true[:, None], area_det[None, :])
+        np.minimum(area_true[:, None], area_det[None, :], out=area_norm)
     else:
         raise ValueError(
             f"overlap_metric {overlap_metric} is not supported, "
